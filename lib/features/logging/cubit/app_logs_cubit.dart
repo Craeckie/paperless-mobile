@@ -60,15 +60,29 @@ class AppLogsCubit extends Cubit<AppLogsState> {
     DateTime date,
     List<DateTime> availableLogs,
   ) async {
-    final logs = await file.readAsLines();
-    final parsedLogs = ParsedLogMessage.parse(logs).reversed.toList();
-    emit(
-      AppLogsStateLoaded(
-        date: date,
-        logs: parsedLogs,
-        availableLogs: availableLogs,
-      ),
-    );
+    try {
+      final logs = await file.readAsLines();
+      final parsedLogs = ParsedLogMessage.parse(logs).reversed.toList();
+      if (isClosed) {
+        return;
+      }
+      emit(
+        AppLogsStateLoaded(
+          date: date,
+          logs: parsedLogs,
+          availableLogs: availableLogs,
+        ),
+      );
+    } catch (e) {
+      // Contain parse/read failures locally. This method is invoked from the
+      // file watch callback as `async void`, so an uncaught throw would escape
+      // to the global zone handler, which logs it back into the very file being
+      // watched and re-triggers this method -> infinite error-spam loop. Do NOT
+      // re-log via `logger` here for the same reason.
+      if (!isClosed) {
+        emit(AppLogsStateError(error: e, date: date));
+      }
+    }
   }
 
   Future<void> clearLogs(DateTime date) async {

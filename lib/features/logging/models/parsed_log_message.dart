@@ -10,8 +10,9 @@ sealed class ParsedLogMessage {
     while (offset < logs.length) {
       final currentLine = logs[offset];
       if (ParsedFormattedLogMessage.canConsumeFirstLine(currentLine)) {
-        final (consumedLines, result) =
-            ParsedFormattedLogMessage.consume(logs.sublist(offset));
+        final (consumedLines, result) = ParsedFormattedLogMessage.consume(
+          logs.sublist(offset),
+        );
         messages.add(result);
         offset += consumedLines;
       } else {
@@ -26,32 +27,36 @@ sealed class ParsedLogMessage {
 class ParsedErrorLogMessage {
   static final RegExp _errorBeginPattern = RegExp(r"---BEGIN ERROR---\s*");
   static final RegExp _errorEndPattern = RegExp(r"---END ERROR---\s*");
-  static final RegExp _stackTraceBeginPattern =
-      RegExp(r"---BEGIN STACKTRACE---\s*");
-  static final RegExp _stackTraceEndPattern =
-      RegExp(r"---END STACKTRACE---\s*");
+  static final RegExp _stackTraceBeginPattern = RegExp(
+    r"---BEGIN STACKTRACE---\s*",
+  );
+  static final RegExp _stackTraceEndPattern = RegExp(
+    r"---END STACKTRACE---\s*",
+  );
   final String error;
   final String? stackTrace;
-  ParsedErrorLogMessage({
-    required this.error,
-    this.stackTrace,
-  });
+  ParsedErrorLogMessage({required this.error, this.stackTrace});
   static bool canConsumeFirstLine(String line) =>
       _errorBeginPattern.hasMatch(line);
 
   static (int consumedLines, ParsedErrorLogMessage? result) consume(
-      List<String> log) {
+    List<String> log,
+  ) {
     assert(log.isNotEmpty && canConsumeFirstLine(log.first));
     String errorText = "";
     int currentLine =
         1; // Skip first because we know that the first line is ---BEGIN ERROR---
 
-    while (!_errorEndPattern.hasMatch(log[currentLine])) {
+    while (currentLine < log.length &&
+        !_errorEndPattern.hasMatch(log[currentLine])) {
       errorText += log[currentLine] + _newLine;
       currentLine++;
     }
     currentLine++;
-    if (log.length == currentLine) {
+    if (log.length <= currentLine) {
+      // Reached end of file: either the closing ---END ERROR--- was the last
+      // line or the block is truncated (still being written). Either way there
+      // are no further lines to read for a stack trace.
       return (currentLine, ParsedErrorLogMessage(error: errorText));
     }
     final hasStackTrace = _stackTraceBeginPattern.hasMatch(log[currentLine]);
@@ -60,7 +65,8 @@ class ParsedErrorLogMessage {
       currentLine++;
       String stackTraceText = '';
 
-      while (!_stackTraceEndPattern.hasMatch(log[currentLine])) {
+      while (currentLine < log.length &&
+          !_stackTraceEndPattern.hasMatch(log[currentLine])) {
         stackTraceText += log[currentLine] + _newLine;
         currentLine++;
       }
@@ -68,7 +74,7 @@ class ParsedErrorLogMessage {
     }
     return (
       currentLine + 1,
-      ParsedErrorLogMessage(error: errorText, stackTrace: stackTrace)
+      ParsedErrorLogMessage(error: errorText, stackTrace: stackTrace),
     );
   }
 }
@@ -105,7 +111,8 @@ class ParsedFormattedLogMessage extends ParsedLogMessage {
   static bool canConsumeFirstLine(String line) => pattern.hasMatch(line);
 
   static (int consumedLines, ParsedFormattedLogMessage result) consume(
-      List<String> log) {
+    List<String> log,
+  ) {
     assert(log.isNotEmpty && canConsumeFirstLine(log.first));
 
     final match = pattern.firstMatch(log.first)!;
@@ -121,12 +128,10 @@ class ParsedFormattedLogMessage extends ParsedLogMessage {
       return (1, result);
     }
     if (ParsedErrorLogMessage.canConsumeFirstLine(updatedLog.first)) {
-      final (consumedLines, parsedError) =
-          ParsedErrorLogMessage.consume(updatedLog);
-      return (
-        consumedLines + 1,
-        result.copyWith(error: parsedError),
+      final (consumedLines, parsedError) = ParsedErrorLogMessage.consume(
+        updatedLog,
       );
+      return (consumedLines + 1, result.copyWith(error: parsedError));
     }
     return (1, result);
   }
